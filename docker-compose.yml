@@ -1,0 +1,118 @@
+# docker-compose.yml
+
+# ============================================
+# THEORY: Docker Compose
+#
+# - Defines multi-container applications
+# - Creates isolated networks
+# - Manages volumes for data persistence
+# - Handles service dependencies
+#
+# Commands:
+# docker-compose up -d      # Start all services
+# docker-compose down       # Stop all services
+# docker-compose logs -f    # View logs
+# docker-compose ps         # List containers
+# ============================================
+
+version: '3.8'
+
+services:
+  # ============================================
+  # DATABASE: PostgreSQL
+  # ============================================
+  db:
+    image: postgres:15-alpine
+    container_name: demo_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_network
+
+  # ============================================
+  # BACKEND: Django
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: demo_django
+    restart: unless-stopped
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=your-super-secret-key-change-in-production
+      - DATABASE_HOST=db
+      - DATABASE_PORT=5432
+      - POSTGRES_DB=mydb
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn --bind 0.0.0.0:8000 --workers 3 backend.wsgi:application"
+    networks:
+      - backend_network
+      - frontend_network
+
+  # ============================================
+  # FRONTEND: React
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: demo_react
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    networks:
+      - frontend_network
+
+  # ============================================
+  # REVERSE PROXY: Nginx
+  # ============================================
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: demo_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - backend_network
+      - frontend_network
+
+# ============================================
+# NETWORKS
+# ============================================
+networks:
+  backend_network:
+    driver: bridge
+  frontend_network:
+    driver: bridge
+
+# ============================================
+# VOLUMES
+# ============================================
+volumes:
+  postgres_data:
